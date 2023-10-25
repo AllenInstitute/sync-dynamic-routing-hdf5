@@ -4,34 +4,35 @@ import pathlib
 
 import npc_lims
 from np_session.components.info import Mouse
+from np_session.databases.data_getters import get_psql_cursor
 
 logger = logging.getLogger(__name__)
 logging.basicConfig(level=logging.INFO, filename=f'logs/hdf5_sync_{datetime.datetime.today().date()}.log', filemode='w', format='%(asctime)s - %(levelname)s - %(message)s')
 
+NUM_PREVIOUS_DAYS_TO_SEARCH = 7
+
 if __name__ == "__main__":
-    logger.info('reading NSB training spreadsheet for new sessions')
-    for session_info in npc_lims.get_session_info():
-        if not (t := session_info.training_info):
-            continue
-        if 'np' in t['rig_name'].lower():
-            continue
-        if t['nsb'] is False:
-            continue
-        subject = Mouse(session_info.subject)
-        destfolder = npc_lims.DR_DATA_REPO_ISILON / str(subject.id)
-        destfolder.mkdir(exist_ok=True)
-        
-        glob_pattern = f"DynamicRouting1_{session_info.subject}_{session_info.date.replace('-', '')}_*.hdf5"
-        if next(destfolder.glob(glob_pattern), None) is not None:
-            continue # already synced
-        
-        src = next(pathlib.Path('\\' + str(subject.lims.path)).rglob(glob_pattern), None)
+    today = datetime.datetime.today().date()
+    start_date = today - datetime.timedelta(days=NUM_PREVIOUS_DAYS_TO_SEARCH)
+    logger.info(f'finding behvior sessions in lims created since {start_date}')
+    cur = get_psql_cursor()
+    cur.execute("select storage_directory from behavior_sessions where date_of_acquisition >= %s", (start_date,))
+    logger.info(f'found {cur.rowcount} behavior sessions (not all DR)')
+    sessions = cur.fetchall()
+    for session in sessions:
+        glob_pattern = f"DynamicRouting1*.hdf5"
+        src = next(pathlib.Path('/' + session['storage_directory']).rglob(glob_pattern), None)
         if src is None:
-            logger.info(f'No file matching {glob_pattern!r} in {subject.lims.path=}')
-            continue
-        
+            continue # not a DR session
+        subject = npc_lims.npc_session.extract_subject(src.stem)
+        assert subject is not None, f'failed to extract subject from {src}'
+        dest = npc_lims.DR_DATA_REPO_ISILON / str(subject) / src.name
+        if dest.exists():
+            continue # already synced       
         logger.info(f'Copying {src.name}')
-        dest = destfolder / src.name
         assert dest.exists() is False, f'{dest.name} already exists'
+        dest.parent.mkdir(exist_ok=True, parents=True)
         dest.write_bytes(s := src.read_bytes())
         assert s == dest.read_bytes(), f'Failed to copy {src.name} correctly'
+        
+    logger.info('done')
