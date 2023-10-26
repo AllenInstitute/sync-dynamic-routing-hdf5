@@ -7,14 +7,14 @@ from np_session.components.info import Mouse
 from np_session.databases.data_getters import get_psql_cursor
 
 logger = logging.getLogger(__name__)
-logging.basicConfig(level=logging.INFO, filename=f'logs/hdf5_sync_{datetime.datetime.today().date()}.log', filemode='w', format='%(asctime)s - %(levelname)s - %(message)s')
+logging.basicConfig(level=logging.INFO, filename=f'logs/hdf5_sync_{datetime.datetime.today().date()}.log', filemode='a', format='%(asctime)s - %(levelname)s - %(message)s')
 
 NUM_PREVIOUS_DAYS_TO_SEARCH = 7
 
 if __name__ == "__main__":
     today = datetime.datetime.today().date()
     start_date = today - datetime.timedelta(days=NUM_PREVIOUS_DAYS_TO_SEARCH)
-    logger.info(f'finding behvior sessions in lims created since {start_date}')
+    logger.info(f'finding behavior sessions in lims created since {start_date}')
     cur = get_psql_cursor()
     cur.execute("select storage_directory from behavior_sessions where date_of_acquisition >= %s", (start_date,))
     logger.info(f'found {cur.rowcount} behavior sessions (not all DR)')
